@@ -16,14 +16,14 @@
 // ----------------------------------------------------------------------
 
 const Applet = imports.ui.applet;
-const PopupMenu = imports.ui.popupMenu;
-const GLib = imports.gi.GLib;
-const Gio = imports.gi.Gio;
-const Gettext = imports.gettext;
 const Lang = imports.lang;
-const ModalDialog = imports.ui.modalDialog;
+const Soup = imports.gi.Soup; // for making https requests
+const PopupMenu = imports.ui.popupMenu;
+const GLib = imports.gi.GLib; // for translation
+const Gettext = imports.gettext;
+const ModalDialog = imports.ui.modalDialog; // for error handling
 
-const UUID = "wireguard@nicoulaj.net";
+const UUID = "public-ip-info@eller-software.de";
 
 Gettext.bindtextdomain(UUID, GLib.get_home_dir() + "./local/share/locale");
 
@@ -31,185 +31,82 @@ function _(str) {
     return Gettext.dgettext(UUID, str)
 }
 
-function main(metadata, orientation) {
-    return new WireGuardApplet(orientation);
-}
 
-const WireGuardApplet = class WireGuardApplet extends Applet.IconApplet {
-
+const PublicIPAddressApplet = class PublicIPAddressApplet extends Applet.IconApplet {
+    
     constructor(orientation, panel_height, instance_id) {
         super(orientation, panel_height, instance_id);
 
         this._orientation = orientation;
         this._menu_manager = null;
         this._menu = null;
-        this._net_monitor = null;
-        this._net_monitor_id = null;
-        this._net_interfaces = null;
-        this._wg_monitor = null;
-        this._wg_monitor_id = null;
-        this._wg_interfaces = null;
+        this._refreshTimer = null;
 
-        this.set_applet_icon_name("off");
-        this.set_applet_tooltip(_("WireGuard"));
+        this.ipv4 = _("?");
+        this.ipv6 = _("?");
+
+        this._ipv4menu = null;
+        this._ipv6menu = null;
+
+        this.set_applet_icon_name("icon");
+        this.set_applet_tooltip(_("Public-IP-Address"));
     }
 
     on_applet_added_to_panel(userEnabled) {
-
-        if (!this._net_monitor) {
-            this._net_monitor = Gio.network_monitor_get_default();
-            this._net_monitor_id = this._net_monitor.connect('network-changed', (monitor, network_available, user_data) => this._on_net_changed());
-        }
-
-        if (!this._wg_monitor) {
-            let wg_config_path = Gio.file_new_for_path("/etc/wireguard");
-            if (!wg_config_path.query_exists(null)) {
-                this._handle_error(_("WireGuard configs directory /etc/wireguard does not exist, please make sure WireGuard is installed"));
-                return;
-            }
-            this._wg_monitor = wg_config_path.monitor_directory(Gio.FileMonitorFlags.SEND_MOVED, null);
-            this._wg_monitor_id = this._wg_monitor.connect('changed', (type) => this._on_wg_changed());
-        }
-
         if (!this._menu_manager) {
             this._menu_manager = new PopupMenu.PopupMenuManager(this);
             this._menu = new Applet.AppletPopupMenu(this, this._orientation);
             this._menu_manager.addMenu(this._menu);
+            
+            // first item
+            let item = new PopupMenu.PopupMenuItem(_("refresh"));
+            item.connect('activate', Lang.bind(this, this._onRefreshActivate));
+            this._menu.addMenuItem(item);
+
+            // second item
+            this._ipv4menu = new PopupMenu.PopupMenuItem(this.ipv4);
+            this._menu.addMenuItem(this._ipv4menu);
+
+            this._ipv6menu = new PopupMenu.PopupMenuItem(this.ipv6);
+            this._menu.addMenuItem(this._ipv6menu);
+
+            this._startRefreshTimer();
         }
-
-        if (!this._net_interfaces)
-            this._net_interfaces = this._get_net_interfaces();
-
-        if (!this._wg_interfaces)
-            this._wg_interfaces = this._get_wg_interfaces();
-
-        this._refresh();
+        this._onRefreshActivate();
     }
 
     on_applet_removed_from_panel(deleteConfig) {
-        if (this._net_monitor) {
-            this._net_monitor.disconnect(this._net_monitor_id);
-            this._net_monitor = null;
-        }
-
-        if (this._wg_monitor) {
-            this._wg_monitor.disconnect(this._wg_monitor_id);
-            this._wg_monitor = null;
-        }
-
+        this._stopRefreshTimer();
         if (this._menu_manager) {
             this._menu_manager.removeMenu(this._menu);
             this._menu = null;
             this._menu_manager = null;
         }
-
-        if (this._net_interfaces)
-            this._net_interfaces = null;
-
-        if (this._wg_interfaces)
-            this._wg_interfaces = null;
     }
 
     on_applet_clicked(event) {
-        if (this._menu)
+        if (this._menu) {
             this._menu.toggle();
-    }
-
-    on_item_toggled(iface, object, enable) {
-        object.setToggleState(!enable);
-
-        try {
-            const proc = Gio.Subprocess.new(
-                ['pkexec', 'wg-quick', enable ? 'up' : 'down', iface],
-                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_MERGE | GLib.SpawnFlags.SEARCH_PATH
-            );
-
-            let out, self = this;
-
-            proc.get_stdout_pipe().read_bytes_async(1048576, 0, null, Lang.bind(proc, function (o, result) {
-                out = o.read_bytes_finish(result).get_data().toString();
-            }));
-
-            proc.wait_async(null, Lang.bind(proc, function (o, result) {
-                if (proc.get_exit_status())
-                    self._handle_error(_("Failed toggling WireGuard interface"), out, false);
-            }));
-
-        } catch (e) {
-            this._handle_error(_("Failed calling wg-quick, please make sure it is installed and accessible"), e, false);
         }
     }
 
-    _on_net_changed() {
-
-        const net_interfaces = this._get_net_interfaces();
-        if (!net_interfaces)
+    _startRefreshTimer() {
+        if (this._refreshTimer) {
             return;
-
-        if (!WireGuardApplet._array_equals(this._net_interfaces, net_interfaces)) {
-            this._net_interfaces = net_interfaces;
-            this._refresh();
+        }   
+        this._refreshTimer = setInterval(Lang.bind(this, this._onRefreshActivate), 5000);
+    }
+    
+    _stopRefreshTimer() {
+        if (this._refreshTimer) {
+            clearInterval(this._refreshTimer);
+            this._refreshTimer = null;
         }
     }
 
-    _on_wg_changed() {
-
-        const wg_interfaces = this._get_wg_interfaces();
-        if (!wg_interfaces)
-            return;
-
-        if (!WireGuardApplet._array_equals(this._wg_interfaces, wg_interfaces)) {
-            this._wg_interfaces = wg_interfaces;
-            this._refresh();
-        }
-    }
-
-    _get_net_interfaces() {
-        try {
-            const interfaces = [];
-            for (let file, enumerator = Gio.file_new_for_path("/sys/class/net").enumerate_children("standard::name", Gio.FileQueryInfoFlags.NONE, null); (file = enumerator.next_file(null)) !== null;)
-                interfaces.push(file.get_name());
-            return interfaces;
-        } catch (e) {
-            this._handle_error(_("Failed reading network interfaces"), e);
-        }
-    }
-
-    _get_wg_interfaces() {
-        try {
-            const interfaces = [];
-            for (let file, enumerator = Gio.file_new_for_path("/etc/wireguard").enumerate_children("standard::name", Gio.FileQueryInfoFlags.NONE, null); (file = enumerator.next_file(null)) !== null;)
-                if (file.get_file_type() == Gio.FileType.REGULAR && file.get_name().endsWith(".conf"))
-                    interfaces.push(file.get_name().slice(0, -5));
-            return interfaces;
-        } catch (e) {
-            this._handle_error(_("Failed accessing WireGuard configs directory, please make sure it is accessible\nsudo chmod o+r /etc/wireguard or sudo setfacl -m u:$username:rx /etc/wireguard"), e);
-        }
-    }
-
-    _refresh() {
-
-        if (!this._menu)
-            return;
-
-        this._menu.removeAll();
-
-        let active_ifaces = 0;
-
-        for (let i = 0; i < this._wg_interfaces.length; i++) {
-            const iface = this._wg_interfaces[i];
-
-            const enabled = this._net_interfaces.includes(iface);
-            if (enabled)
-                active_ifaces++;
-
-            const item = new PopupMenu.PopupSwitchMenuItem(iface, enabled);
-            item.connect('toggled', (object, value) => this.on_item_toggled(iface, object, value));
-            this._menu.addMenuItem(item);
-        }
-
-        this.set_applet_icon_name(active_ifaces > 0 ? "on" : "off");
-        this.set_applet_tooltip(_("WireGuard"));
+    _onRefreshActivate() {
+        global.log("refreshing ...");
+        this._get_public_ip_addresses();
     }
 
     _handle_error(msg, details = null, fatal = true) {
@@ -228,7 +125,59 @@ const WireGuardApplet = class WireGuardApplet extends Applet.IconApplet {
         }
     }
 
-    static _array_equals(arr1, arr2) {
-        return arr1.length == arr2.length && arr1.filter(e => arr2.includes(e)).length == arr1.length
+
+    _update_display() {
+        global.log("aktuell IPv4 " + this.ipv4 + " / IPv6 " + this.ipv6);
+        this._ipv4menu.label.set_text(this.ipv4 || "N/A"); // Update menu items
+        this._ipv6menu.label.set_text(this.ipv6 || "N/A");
     }
-};
+
+    _get_public_ip_addresses() {
+        this.ipv4 = "N/A";
+        this.ipv6 = "N/A";
+        this._fetchIPWithTimeout("https://api4.ipify.org?format=plain", (ip) => {
+            global.log("callback ipv4");
+            this.ipv4 = ip || _("unknown");
+            this._update_display();
+        });
+        this._fetchIPWithTimeout("https://api6.ipify.org?format=plain", (ip) => {
+            global.log("callback ipv6-1");
+            if (ip) {
+                this.ipv6 = ip;
+                this._update_display();
+            } else {
+                this._fetchIPWithTimeout("https://v6.ident.me/", (ip) => { // Fallback to v6.ident.me
+                    global.log("callback ipv6-2");
+                    this.ipv6 = ip || _("unknown");
+                    this._update_display();
+                });
+            }
+        });
+    }
+       
+
+    _fetchIPWithTimeout(url, callback) {
+        let session = new Soup.Session();
+        let message = Soup.Message.new('GET', url);
+        session.send_and_read_async(message, Soup.MessagePriority.NORMAL, null, (session, res) => {
+            global.log("in reading " + url);
+            try {
+                let response = session.send_and_read_finish(res);
+                if (message.status_code === 200) {
+                    callback(response.get_data().toString());
+                } else {
+                    callback(null);
+                }
+            } catch (error) {
+                global.logError(`Failed to fetch IP: ${error}`);
+                callback(null);
+            }
+        });
+    }
+
+}
+
+
+function main(metadata, orientation) {
+    return new PublicIPAddressApplet(orientation);
+}

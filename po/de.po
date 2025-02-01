@@ -1,0 +1,42 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-02-01 15:56+0100\n"
+"PO-Revision-Date: 2025-02-01 15:58+0100\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.4.2\n"
+
+#: applet.js:45
+msgid "Public-IP-Address"
+msgstr "Public-IP-Address"
+
+#: applet.js:77
+msgid "Public-IP-Address2"
+msgstr "a andere ip address"
+
+#: applet.js:84
+msgid "Error details"
+msgstr "Fehler-Details"
+
+#. metadata.json->name
+msgid "public IP address"
+msgstr "ja wasis jetzt des"
+
+#. metadata.json->description
+msgid "show public ip v4 and ip v6 address"
+msgstr "zeigt die öffentliche IPv4 und IPv6 Addresse"
+
+#~ msgid "PublicIPinfo"
+#~ msgstr "Öffentliche IP Information"

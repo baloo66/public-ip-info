@@ -1,11 +1,12 @@
 {
-  "uuid": "wireguard@nicoulaj.net",
-  "name": "WireGuard",
-  "website": "https://github.com/nicoulaj/cinnamon-applet-wireguard",
-  "description": "Enable/disable WireGuard connections.",
+  "name": "public IP address",
+  "description": "show public ip v4 and ip v6 address",
+  "version": "1.0.0",
+  "uuid": "public-ip-info@eller-software.de",
   "original-authors": [
-    "Julien Nicoulaud <julien.nicoulaud@gmail.com>"
+    "Alexander Eller <ellera@eller-software.de>"
   ],
-  "version": "1.0.3",
+  "website": "https://github.com/baloo66/public-ip-info",
+  "icon": "icon.png",  
   "max-instances": "-1"
 }
